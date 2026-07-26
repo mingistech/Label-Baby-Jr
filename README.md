@@ -56,4 +56,4 @@ Labels are saved as JSON documents describing the label size and an ordered list
 
 ## License
 
-No license has been specified yet — all rights reserved by default.
+Released under the [MIT License](LICENSE).

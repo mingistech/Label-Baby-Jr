@@ -88,7 +88,7 @@ struct ContentView: View {
                     }
                 }
                 .fixedSize()
-                .help("Sizes the selected text, or the whole label when nothing is selected. Turns off auto-sizing.")
+                .help("Sizes the selected text, or the whole label when nothing is selected. Turns off Auto fit.")
 
                 Toggle("Bold", isOn: Binding(
                     get: { editor.isBold },
@@ -107,32 +107,11 @@ struct ContentView: View {
             }
             .toggleStyle(.checkbox)
 
-            HStack(spacing: 16) {
-                Toggle("Auto-size to fit", isOn: Binding(
-                    get: { editor.isAutoSizeEnabled },
-                    set: { editor.setAutoSizeEnabled($0) }
-                ))
-                .toggleStyle(.checkbox)
-
-                HStack(spacing: 6) {
-                    Text("Max size")
-                        .fixedSize()
-                    Stepper(value: Binding(
-                        get: { editor.maximumFontSize },
-                        set: { editor.setMaximumFontSize($0) }
-                    ), in: LabelTypography.minimumFontSize ... LabelTypography.maximumFontSize, step: 1) {
-                        Text("\(Int(editor.maximumFontSize)) pt")
-                            .monospacedDigit()
-                            .fixedSize()
-                            .frame(width: 40, alignment: .leading)
-                    }
-                }
-                .fixedSize()
-                .foregroundStyle(editor.isAutoSizeEnabled ? .primary : .secondary)
-                .disabled(!editor.isAutoSizeEnabled)
-
-                Spacer(minLength: 0)
-            }
+            Toggle("Auto fit", isOn: Binding(
+                get: { editor.isAutoSizeEnabled },
+                set: { editor.setAutoSizeEnabled($0) }
+            ))
+            .toggleStyle(.checkbox)
         }
     }
 
@@ -177,10 +156,10 @@ struct ContentView: View {
                     Text(overflowMessage)
                         .fixedSize(horizontal: false, vertical: true)
                 } else if editor.isAutoSizeEnabled {
-                    Text("Auto-sized to \(formatted(editor.fittedFontSize)) pt to fit the label.")
+                    Text("Auto fit to \(formatted(editor.fittedFontSize)) pt.")
                         .fixedSize(horizontal: false, vertical: true)
                 } else {
-                    Text("Sized by hand at \(formatted(editor.fittedFontSize)) pt. Auto-sizing is off.")
+                    Text("Sized by hand at \(formatted(editor.fittedFontSize)) pt. Auto fit is off.")
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
@@ -195,7 +174,7 @@ struct ContentView: View {
         if editor.isAutoSizeEnabled {
             return "Too long to fit at \(Int(LabelTypography.minimumFontSize)) pt — shorten the text or remove a line."
         }
-        return "Too big to fit — reduce the size or turn auto-size back on."
+        return "Too big to fit — reduce the size or turn Auto fit back on."
     }
 
     private var printerSection: some View {

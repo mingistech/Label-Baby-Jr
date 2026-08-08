@@ -43,7 +43,7 @@ enum LabelTypography {
     static let heightPoints = heightMillimeters * 72.0 / 25.4
     static let fontFamily = "Helvetica"
     static let defaultFontSize: CGFloat = 14
-    static let placeholderText = "Type on label"
+    static let placeholderText = "Type here"
 
     /// A fixed gray rather than a dynamic system color: the label is always white
     /// paper, so a color that adapts to the app's dark theme would render nearly

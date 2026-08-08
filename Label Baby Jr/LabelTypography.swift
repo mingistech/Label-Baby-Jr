@@ -45,6 +45,23 @@ enum LabelTypography {
     static let defaultFontSize: CGFloat = 14
     static let placeholderText = "Type on label"
 
+    /// A fixed gray rather than a dynamic system color: the label is always white
+    /// paper, so a color that adapts to the app's dark theme would render nearly
+    /// invisible on it.
+    static let placeholderColor = NSColor(white: 0.62, alpha: 1)
+
+    /// Bounds for the auto-fit sizer, in print-accurate points. Text is drawn as
+    /// large as will fit up to the user's chosen ceiling, and never shrinks past
+    /// `minimumFontSize` so a printed label always stays readable.
+    static let minimumFontSize: CGFloat = 8
+    static let maximumFontSize: CGFloat = 72
+    static let defaultMaximumFontSize: CGFloat = 52
+
+    /// Auto-fit searches whole point sizes only. Quantizing keeps the chosen size
+    /// stable between keystrokes, which is what prevents the text from visibly
+    /// twitching as the measured size crosses a threshold.
+    static let fontSizeQuantum: CGFloat = 1
+
     /// The real, print-accurate margins applied when rendering the label for
     /// the printer. The on-screen editor scales these by its preview zoom
     /// factor so the displayed margin always matches the printed margin.
@@ -99,7 +116,7 @@ enum LabelTypography {
             attributes: attributes(
                 fontSize: fontSize,
                 alignment: alignment,
-                foregroundColor: .placeholderTextColor
+                foregroundColor: placeholderColor
             )
         )
     }

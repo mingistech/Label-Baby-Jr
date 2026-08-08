@@ -11,6 +11,7 @@ Label Baby Jr is a lightweight, document-based label editor built with SwiftUI a
 ## Features
 
 - **Rich text editing** — bold, italic, underline, font size, and left/center/right alignment
+- **Auto-sizing text** — text starts large and shrinks as you type so it always fits the label; pick a max size, or turn auto-size off and set sizes by hand
 - **WYSIWYG label preview** — an enlarged, print-accurate editor view of the 89×28mm label
 - **DYMO printing** — printer picker (automatically filtered to DYMO printers only) with a copies stepper
 - **Document-based** — labels are saved as `.labelbabyjr` files (a simple JSON format) and integrate with macOS's standard Open Recent / document handling
@@ -38,6 +39,8 @@ Labels are saved as JSON documents describing the label size and an ordered list
 {
   "formatVersion": 1,
   "labelSize": { "widthMM": 89, "heightMM": 28 },
+  "autoSize": true,
+  "maxFontSize": 52,
   "runs": [
     { "text": "Hello", "fontSize": 14, "bold": true, "italic": false, "underline": false, "alignment": "center" }
   ]
@@ -57,6 +60,7 @@ Labels are saved as JSON documents describing the label size and an ordered list
 | `HomeView.swift` / `RecentLabelsStore.swift` | Recent labels home screen and persistence |
 | `SettingsView.swift` / `AppSettings.swift` | App preferences |
 | `LabelTypography.swift` | Shared label size, font, and margin constants |
+| `LabelAutoFitSizer.swift` | Binary-search sizer that finds the largest whole-point font that still fits |
 
 ## License
 

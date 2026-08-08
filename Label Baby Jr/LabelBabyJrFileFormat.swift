@@ -27,16 +27,32 @@ struct LabelBabyJrFile: Codable, Equatable {
     var labelSize: LabelSize
     var runs: [LabelRun]
 
+    /// Whether the label's text is sized automatically to fit. Once the user
+    /// resizes text by hand this becomes false and the sizes in `runs` are theirs
+    /// to keep, so it has to travel with the file.
+    var autoSize: Bool
+
+    /// The ceiling auto-sizing may grow to, in print-accurate points.
+    var maxFontSize: Double
+
     static let empty = LabelBabyJrFile(
         formatVersion: currentFormatVersion,
         labelSize: .standard,
         runs: []
     )
 
-    init(formatVersion: Int, labelSize: LabelSize, runs: [LabelRun]) {
+    init(
+        formatVersion: Int,
+        labelSize: LabelSize,
+        runs: [LabelRun],
+        autoSize: Bool = true,
+        maxFontSize: Double = Double(LabelTypography.defaultMaximumFontSize)
+    ) {
         self.formatVersion = formatVersion
         self.labelSize = labelSize
         self.runs = runs
+        self.autoSize = autoSize
+        self.maxFontSize = maxFontSize
     }
 
     init(from decoder: Decoder) throws {
@@ -47,6 +63,12 @@ struct LabelBabyJrFile: Codable, Equatable {
         }
         labelSize = try container.decode(LabelSize.self, forKey: .labelSize)
         runs = try container.decode([LabelRun].self, forKey: .runs)
+
+        // Labels written before manual sizing existed have neither key, and were
+        // saved at whatever size they were shown at, so auto-sizing them is right.
+        autoSize = try container.decodeIfPresent(Bool.self, forKey: .autoSize) ?? true
+        maxFontSize = try container.decodeIfPresent(Double.self, forKey: .maxFontSize)
+            ?? Double(LabelTypography.defaultMaximumFontSize)
     }
 
     func encodedData() throws -> Data {

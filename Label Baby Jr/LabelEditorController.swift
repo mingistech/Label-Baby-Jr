@@ -5,7 +5,20 @@ import Combine
 @MainActor
 final class LabelEditorController: ObservableObject {
     @Published private(set) var plainText = ""
-    @Published var fontSize = LabelTypography.defaultFontSize
+
+    /// The largest size the label's text is allowed to grow to. The size actually
+    /// drawn is chosen by the auto-fit sizer and reported back as `fittedFontSize`.
+    @Published private(set) var maximumFontSize = LabelTypography.defaultMaximumFontSize
+    @Published private(set) var fittedFontSize = LabelTypography.defaultMaximumFontSize
+    @Published private(set) var isTextOverflowing = false
+
+    /// False once the user has sized text by hand, which hands sizing over to them
+    /// until they switch auto-sizing back on.
+    @Published private(set) var isAutoSizeEnabled = true
+
+    /// Size of the text at the insertion point, or of the selection's first run.
+    @Published private(set) var selectionFontSize = LabelTypography.defaultMaximumFontSize
+
     @Published var isBold = false
     @Published var isItalic = false
     @Published var isUnderlined = false
@@ -32,6 +45,10 @@ final class LabelEditorController: ObservableObject {
         isLoadingDocument = true
         defer { isLoadingDocument = false }
 
+        // Set before loading so a hand-sized label isn't re-fitted on open.
+        isAutoSizeEnabled = file.autoSize
+        maximumFontSize = Self.clampedFontSize(CGFloat(file.maxFontSize))
+
         editor?.loadContent(from: file)
         syncStyleStateFromEditor()
     }
@@ -40,7 +57,11 @@ final class LabelEditorController: ObservableObject {
         guard let attributedString = editor?.attributedStringForDocument() else {
             return .empty
         }
-        return LabelBabyJrFile.from(attributedString: attributedString)
+
+        var file = LabelBabyJrFile.from(attributedString: attributedString)
+        file.autoSize = isAutoSizeEnabled
+        file.maxFontSize = Double(maximumFontSize)
+        return file
     }
 
     func updatePlainText(_ text: String) {
@@ -55,19 +76,52 @@ final class LabelEditorController: ObservableObject {
         isSyncingStyleFromEditor = true
         defer { isSyncingStyleFromEditor = false }
 
-        if fontSize != state.fontSize { fontSize = state.fontSize }
         if isBold != state.isBold { isBold = state.isBold }
         if isItalic != state.isItalic { isItalic = state.isItalic }
         if isUnderlined != state.isUnderlined { isUnderlined = state.isUnderlined }
         if alignment != state.alignment { alignment = state.alignment }
+        if abs(selectionFontSize - state.fontSize) > 0.01 { selectionFontSize = state.fontSize }
     }
 
+    func setMaximumFontSize(_ size: CGFloat) {
+        let clamped = Self.clampedFontSize(size)
+        guard abs(maximumFontSize - clamped) > 0.01 else { return }
+        maximumFontSize = clamped
+        editor?.applyAutoFit()
+        notifyDocumentContentChanged()
+    }
+
+    /// Sizes the selected text by hand, which switches auto-sizing off: the user's
+    /// size would otherwise be overwritten by the next re-fit.
     func applyFontSize(_ size: CGFloat) {
         guard !isSyncingStyleFromEditor else { return }
-        guard abs(fontSize - size) > 0.01 else { return }
-        fontSize = size
-        editor?.applyFontSize(size)
+
+        let clamped = Self.clampedFontSize(size)
+        isAutoSizeEnabled = false
+        editor?.applyFontSize(clamped)
         syncStyleStateFromEditor()
+        notifyDocumentContentChanged()
+    }
+
+    func setAutoSizeEnabled(_ enabled: Bool) {
+        guard isAutoSizeEnabled != enabled else { return }
+        isAutoSizeEnabled = enabled
+        // Turning it back on re-fits the label; turning it off keeps the sizes
+        // currently on screen as the user's starting point.
+        editor?.applyAutoFit()
+        syncStyleStateFromEditor()
+        notifyDocumentContentChanged()
+    }
+
+    /// Sizes are whole points, both the auto-size ceiling and hand-picked sizes.
+    private static func clampedFontSize(_ size: CGFloat) -> CGFloat {
+        min(max(size.rounded(), LabelTypography.minimumFontSize), LabelTypography.maximumFontSize)
+    }
+
+    /// Called by the editor whenever it has re-measured and resized the text.
+    func autoFitDidUpdate(fontSize: CGFloat, fitsWithinBounds: Bool) {
+        if abs(fittedFontSize - fontSize) > 0.01 { fittedFontSize = fontSize }
+        if isTextOverflowing != !fitsWithinBounds { isTextOverflowing = !fitsWithinBounds }
         notifyDocumentContentChanged()
     }
 

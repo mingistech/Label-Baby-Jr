@@ -3,6 +3,8 @@ import AppKit
 import SwiftUI
 
 struct LabelEditorStyleState {
+    /// When read from the editor this is the size at the insertion point; when
+    /// supplied *to* the editor it is the ceiling the auto-fit sizer may grow to.
     var fontSize: CGFloat
     var isBold: Bool
     var isItalic: Bool
@@ -41,7 +43,7 @@ private struct EditableLabelViewRepresentable: NSViewRepresentable {
     func makeNSView(context: Context) -> EditableLabelContainerView {
         let view = EditableLabelContainerView(previewScale: previewScale)
         view.delegate = context.coordinator
-        view.showPlaceholderIfNeeded()
+        view.refreshPlaceholder()
         controller.attachEditor(view)
         return view
     }
@@ -63,9 +65,17 @@ private struct EditableLabelViewRepresentable: NSViewRepresentable {
             controller.syncStyleStateFromEditor()
         }
 
+        func autoFitDidUpdate(fontSize: CGFloat, fitsWithinBounds: Bool) {
+            controller.autoFitDidUpdate(fontSize: fontSize, fitsWithinBounds: fitsWithinBounds)
+        }
+
+        func isAutoSizeEnabled() -> Bool {
+            controller.isAutoSizeEnabled
+        }
+
         func preferredStyleState() -> LabelEditorStyleState {
             LabelEditorStyleState(
-                fontSize: controller.fontSize,
+                fontSize: controller.maximumFontSize,
                 isBold: controller.isBold,
                 isItalic: controller.isItalic,
                 isUnderlined: controller.isUnderlined,
@@ -78,31 +88,104 @@ private struct EditableLabelViewRepresentable: NSViewRepresentable {
 protocol EditableLabelContainerViewDelegate: AnyObject {
     func textDidChange(_ plainText: String)
     func selectionDidChange()
+    func autoFitDidUpdate(fontSize: CGFloat, fitsWithinBounds: Bool)
     func preferredStyleState() -> LabelEditorStyleState
+    func isAutoSizeEnabled() -> Bool
 }
 
 /// Overriding `mouseDown` forces AppKit to use its legacy NSEvent-based
 /// click/drag selection handling instead of the newer gesture-recognizer-based
 /// selection path, which has a drag-selection regression on this OS.
 private final class LegacySelectionTextView: NSTextView {
+    /// The placeholder is drawn on top of an *empty* text storage rather than
+    /// inserted into it. Keeping it out of the storage is what makes typing safe:
+    /// AppKit computes the range it is about to replace before asking the
+    /// delegate anything, so text that had to be removed once the user started
+    /// typing left that range pointing past the end of the storage.
+    var placeholder: NSAttributedString? {
+        didSet { setNeedsDisplay(bounds) }
+    }
+
+    /// Set by the container whenever the label's content becomes empty or not.
+    var isShowingPlaceholder = false {
+        didSet {
+            guard isShowingPlaceholder != oldValue else { return }
+            refreshCaretVisibility()
+            setNeedsDisplay(bounds)
+        }
+    }
+
+    private var hasUserInteracted = false
+    private var visibleInsertionPointColor: NSColor?
+
+    /// Marks the user as having taken over the field, which reveals the caret.
+    /// Driven by clicks and by text changes rather than by a `keyDown` override,
+    /// deliberately keeping this out of the text view's event handling.
+    func markUserInteraction() {
+        guard !hasUserInteracted else { return }
+        hasUserInteracted = true
+        refreshCaretVisibility()
+    }
+
+    /// The caret is hidden by making it transparent. AppKit owns caret drawing
+    /// and blinking; overriding those instead breaks text input on this OS.
+    private func refreshCaretVisibility() {
+        if visibleInsertionPointColor == nil {
+            visibleInsertionPointColor = insertionPointColor
+        }
+
+        let shouldHide = isShowingPlaceholder || !hasUserInteracted
+        let color = shouldHide ? NSColor.clear : (visibleInsertionPointColor ?? .textColor)
+        if insertionPointColor != color {
+            insertionPointColor = color
+        }
+    }
+
     override func mouseDown(with event: NSEvent) {
+        markUserInteraction()
         super.mouseDown(with: event)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+
+        guard isShowingPlaceholder,
+              let placeholder,
+              placeholder.length > 0,
+              let textContainer else { return }
+
+        // Drawn at the same origin real text would use, so showing and clearing
+        // the placeholder never shifts the label's layout.
+        let origin = NSPoint(x: textContainerInset.width, y: textContainerInset.height)
+        let size = NSSize(
+            width: textContainer.containerSize.width,
+            height: max(0, bounds.height - origin.y)
+        )
+        placeholder.draw(with: NSRect(origin: origin, size: size), options: [.usesLineFragmentOrigin, .usesFontLeading])
     }
 }
 
 final class EditableLabelContainerView: NSView {
     weak var delegate: EditableLabelContainerViewDelegate?
-    let textView: NSTextView
+    var textView: NSTextView { labelTextView }
     let previewScale: CGFloat
+
+    private let labelTextView: LegacySelectionTextView
 
     private var isUpdatingFromCode = false
     private var lastVerticalInset: CGFloat = -1
     private var isUpdatingVerticalAlignment = false
-    private var showingPlaceholder = false
+    private var showingPlaceholder = false {
+        didSet { labelTextView.isShowingPlaceholder = showingPlaceholder }
+    }
+
+    private let autoFitSizer = LabelAutoFitSizer()
+    private var isApplyingAutoFit = false
+    private var lastReportedFit: LabelAutoFitResult?
 
     init(previewScale: CGFloat = 1.0) {
         self.previewScale = previewScale
-        textView = LegacySelectionTextView(frame: .zero)
+        labelTextView = LegacySelectionTextView(frame: .zero)
         super.init(frame: NSRect(
             x: 0,
             y: 0,
@@ -140,14 +223,21 @@ final class EditableLabelContainerView: NSView {
         textView.isVerticallyResizable = false
         textView.autoresizingMask = [.width, .height]
         textView.delegate = self
-        textView.typingAttributes = LabelTypography.attributes(fontSize: scaledFontSize(LabelTypography.defaultFontSize))
+        textView.typingAttributes = LabelTypography.attributes(fontSize: scaledFontSize(LabelTypography.defaultMaximumFontSize))
 
         if let textContainer = textView.textContainer {
             textContainer.widthTracksTextView = false
             textContainer.heightTracksTextView = false
             textContainer.lineBreakMode = .byWordWrapping
             textContainer.maximumNumberOfLines = 0
-            textContainer.containerSize = NSSize(width: labelContentWidth, height: labelContentHeight)
+            // Zero padding keeps the label's margins exactly the ones in
+            // `LabelTypography`, so the on-screen text box matches the printed
+            // one and the auto-fit measurements agree with what's drawn.
+            textContainer.lineFragmentPadding = 0
+            textContainer.containerSize = NSSize(
+                width: availableContentSize.width,
+                height: .greatestFiniteMagnitude
+            )
         }
 
         addSubview(textView)
@@ -163,6 +253,27 @@ final class EditableLabelContainerView: NSView {
 
     private var horizontalInset: CGFloat {
         LabelTypography.horizontalMarginPoints * previewScale
+    }
+
+    private var verticalInset: CGFloat {
+        LabelTypography.verticalMarginPoints * previewScale
+    }
+
+    /// The padded box the text has to live inside, in on-screen points.
+    private var availableContentSize: NSSize {
+        NSSize(
+            width: max(1, labelContentWidth - horizontalInset * 2),
+            height: max(1, labelContentHeight - verticalInset * 2)
+        )
+    }
+
+    /// The ceiling the auto-fit sizer may grow to, in print-accurate points.
+    private var maximumFontSize: CGFloat {
+        delegate?.preferredStyleState().fontSize ?? LabelTypography.defaultMaximumFontSize
+    }
+
+    private var autoSizeEnabled: Bool {
+        delegate?.isAutoSizeEnabled() ?? true
     }
 
     private func scaledFontSize(_ logicalSize: CGFloat) -> CGFloat {
@@ -210,44 +321,187 @@ final class EditableLabelContainerView: NSView {
         setNeedsDisplay(bounds)
     }
 
-    func showPlaceholderIfNeeded() {
-        guard contentPlainText.isEmpty else {
-            showingPlaceholder = false
+    /// Rescales the label's text to the largest size that still fits inside the
+    /// padded content box. Runs synchronously so a keystroke and its resize land
+    /// in the same layout pass, which is what keeps the text from flickering.
+    func applyAutoFit() {
+        guard !isApplyingAutoFit else { return }
+
+        isApplyingAutoFit = true
+        defer { isApplyingAutoFit = false }
+
+        let ceiling = max(LabelTypography.minimumFontSize, maximumFontSize)
+
+        guard let textStorage = textView.textStorage, textStorage.length > 0 else {
+            refreshPlaceholder()
+            reportFit(LabelAutoFitResult(fontSize: ceiling, fitsWithinBounds: true))
+            refreshVerticalAlignment()
             return
         }
 
+        showingPlaceholder = false
+
+        guard autoSizeEnabled else {
+            // The user is sizing text by hand, so leave the sizes alone and only
+            // report what they add up to and whether it still fits.
+            let largest = LabelAutoFitSizer.largestFontSize(in: textStorage) ?? scaledFontSize(ceiling)
+            reportFit(LabelAutoFitResult(
+                fontSize: logicalFontSize(largest),
+                fitsWithinBounds: autoFitSizer.fits(textStorage, in: availableContentSize)
+            ))
+            refreshVerticalAlignment()
+            return
+        }
+
+        let result = autoFitSizer.fit(
+            textStorage,
+            in: availableContentSize,
+            previewScale: previewScale,
+            sizeRange: LabelTypography.minimumFontSize ... ceiling
+        )
+
+        applyFittedFontSize(result.fontSize, to: textStorage)
+        reportFit(result)
+        refreshVerticalAlignment()
+    }
+
+    /// Applies a size the user picked by hand. With text selected it covers the
+    /// selection; with nothing selected it covers the whole label, which is what
+    /// "make this label smaller" means when no words are highlighted.
+    func applyFontSize(_ logicalSize: CGFloat) {
+        guard let textStorage = textView.textStorage else { return }
+
+        let selection = safeSelectedRange()
+        let target = selection.length > 0
+            ? selection
+            : NSRange(location: 0, length: textStorage.length)
+        let displaySize = scaledFontSize(logicalSize)
+
+        mutateText(in: target) { attributes in
+            let font = (attributes[.font] as? NSFont)
+                ?? LabelTypography.font(size: displaySize, bold: false, italic: false)
+            attributes[.font] = NSFontManager.shared.convert(font, toSize: displaySize)
+        }
+    }
+
+    /// Scales every run so the largest one lands on `logicalSize`, preserving the
+    /// relative sizes of mixed-size text.
+    private func applyFittedFontSize(_ logicalSize: CGFloat, to textStorage: NSTextStorage) {
+        guard let referenceSize = LabelAutoFitSizer.largestFontSize(in: textStorage), referenceSize > 0 else { return }
+
+        let targetSize = scaledFontSize(logicalSize)
+        guard abs(referenceSize - targetSize) > 0.05 else { return }
+
+        let scale = targetSize / referenceSize
+        let manager = NSFontManager.shared
+        let fullRange = NSRange(location: 0, length: textStorage.length)
+
+        // Resolve every replacement font before mutating, so the storage isn't
+        // edited while it is being enumerated.
+        var replacements: [(range: NSRange, font: NSFont)] = []
+        textStorage.enumerateAttribute(.font, in: fullRange, options: []) { value, range, _ in
+            guard let font = value as? NSFont else { return }
+
+            // Whole points only, rounded down so a rounded-up run can't push the
+            // text past the size that measured as fitting. The epsilon keeps a
+            // run that lands exactly on a whole size from dropping a point.
+            let scaledSize = logicalFontSize(font.pointSize) * scale
+            let wholeSize = max(LabelTypography.minimumFontSize, (scaledSize + 0.001).rounded(.down))
+            replacements.append((range, manager.convert(font, toSize: scaledFontSize(wholeSize))))
+        }
+        guard !replacements.isEmpty else { return }
+
+        let savedSelection = textView.selectedRange()
+
+        isUpdatingFromCode = true
+        textStorage.beginEditing()
+        for replacement in replacements {
+            textStorage.addAttribute(.font, value: replacement.font, range: replacement.range)
+        }
+        textStorage.endEditing()
+
+        // The next character typed has to come in at the new size too, otherwise
+        // it would briefly appear at the old size before the next resize.
+        var typing = textView.typingAttributes
+        if let typingFont = typing[.font] as? NSFont {
+            typing[.font] = manager.convert(typingFont, toSize: max(1, typingFont.pointSize * scale))
+            textView.typingAttributes = typing
+        }
+
+        if savedSelection.location != NSNotFound {
+            let location = min(savedSelection.location, textStorage.length)
+            let length = min(savedSelection.length, textStorage.length - location)
+            textView.setSelectedRange(NSRange(location: location, length: length))
+        }
+        isUpdatingFromCode = false
+
+        redrawTextView()
+    }
+
+    private func reportFit(_ result: LabelAutoFitResult) {
+        guard lastReportedFit != result else { return }
+        lastReportedFit = result
+
+        // Auto-fit can run inside a layout pass, so hand the result to SwiftUI on
+        // the next turn of the run loop rather than mutating observable state
+        // while the view hierarchy is mid-update.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.delegate?.autoFitDidUpdate(
+                fontSize: result.fontSize,
+                fitsWithinBounds: result.fitsWithinBounds
+            )
+        }
+    }
+
+    /// Keeps the drawn placeholder in step with the label's content and style.
+    func refreshPlaceholder() {
+        let isEmpty = (textView.textStorage?.length ?? 0) == 0
+        showingPlaceholder = isEmpty
+        guard isEmpty else { return }
+
         let style = delegate?.preferredStyleState() ?? LabelEditorStyleState(
-            fontSize: LabelTypography.defaultFontSize,
+            fontSize: LabelTypography.defaultMaximumFontSize,
             isBold: false,
             isItalic: false,
             isUnderlined: false,
             alignment: .center
         )
 
-        isUpdatingFromCode = true
-        textView.textStorage?.setAttributedString(LabelTypography.placeholderAttributedString(
-            alignment: style.alignment.nsAlignment,
-            fontSize: scaledFontSize(LabelTypography.defaultFontSize)
-        ))
-        textView.setSelectedRange(NSRange(location: 0, length: 0))
-        textView.typingAttributes = typingAttributes(for: style)
-        isUpdatingFromCode = false
+        // The placeholder is auto-fitted with the same sizer as real text, so it
+        // can't spill past the label's margins either.
+        let ceiling = max(LabelTypography.minimumFontSize, style.fontSize)
+        let alignment = style.alignment.nsAlignment
+        let fit = autoFitSizer.fit(
+            LabelTypography.placeholderAttributedString(alignment: alignment, fontSize: scaledFontSize(ceiling)),
+            in: availableContentSize,
+            previewScale: previewScale,
+            sizeRange: LabelTypography.minimumFontSize ... ceiling
+        )
 
-        showingPlaceholder = true
-        refreshVerticalAlignment()
+        labelTextView.placeholder = LabelTypography.placeholderAttributedString(
+            alignment: alignment,
+            fontSize: scaledFontSize(fit.fontSize)
+        )
+
+        // With nothing typed yet, the next character should arrive at the label's
+        // current style. Under manual sizing that keeps the size the user chose,
+        // rather than snapping back to the auto-size ceiling.
+        var attributes = typingAttributes(for: style)
+        if !autoSizeEnabled,
+           let chosenFont = textView.typingAttributes[.font] as? NSFont,
+           let styledFont = attributes[.font] as? NSFont {
+            attributes[.font] = NSFontManager.shared.convert(styledFont, toSize: chosenFont.pointSize)
+        }
+
+        isUpdatingFromCode = true
+        textView.typingAttributes = attributes
+        isUpdatingFromCode = false
     }
 
     func currentStyleState() -> LabelEditorStyleState {
-        if showingPlaceholder {
-            return delegate?.preferredStyleState() ?? LabelEditorStyleState(
-                fontSize: LabelTypography.defaultFontSize,
-                isBold: false,
-                isItalic: false,
-                isUnderlined: false,
-                alignment: .center
-            )
-        }
-
+        // Safe even with an empty label: the insertion point falls back to the
+        // typing attributes, and the placeholder is no longer part of the storage.
         let attributes = attributesAtInsertionPoint()
         let font = (attributes[.font] as? NSFont) ?? LabelTypography.font(size: scaledFontSize(LabelTypography.defaultFontSize), bold: false, italic: false)
         let traits = NSFontManager.shared.traits(of: font)
@@ -261,13 +515,6 @@ final class EditableLabelContainerView: NSView {
             isUnderlined: underline,
             alignment: LabelTextAlignment(nsAlignment: paragraph?.alignment ?? .center)
         )
-    }
-
-    func applyFontSize(_ size: CGFloat) {
-        mutateText(in: safeSelectedRange()) { attributes in
-            let font = (attributes[.font] as? NSFont) ?? LabelTypography.font(size: LabelTypography.defaultFontSize, bold: false, italic: false)
-            attributes[.font] = NSFontManager.shared.convert(font, toSize: scaledFontSize(size))
-        }
     }
 
     func setBold(_ enabled: Bool) {
@@ -290,20 +537,16 @@ final class EditableLabelContainerView: NSView {
 
     func applyAlignment(_ alignment: LabelTextAlignment) {
         guard let textStorage = textView.textStorage else { return }
-        clearPlaceholderIfNeeded()
         guard textStorage.length > 0 else {
-            var typingAttributes = textView.typingAttributes
-            let paragraphStyle = NSMutableParagraphStyle()
-            paragraphStyle.alignment = alignment.nsAlignment
-            paragraphStyle.lineBreakMode = .byWordWrapping
-            typingAttributes[.paragraphStyle] = paragraphStyle
-            textView.typingAttributes = typingAttributes
+            // Nothing typed yet: re-align the placeholder and the typing
+            // attributes the first character will pick up.
+            refreshPlaceholder()
             return
         }
 
         applyAlignmentToAllText(alignment)
         updateTypingAttributesFromSelection()
-        refreshVerticalAlignment()
+        applyAutoFit()
     }
 
     func attributedStringForPrinting() -> NSAttributedString? {
@@ -333,29 +576,29 @@ final class EditableLabelContainerView: NSView {
         isUpdatingFromCode = true
         defer {
             isUpdatingFromCode = false
-            refreshVerticalAlignment()
+            applyAutoFit()
         }
 
         let attributedString = upscaledForDisplay(file.makeAttributedString())
+        textView.textStorage?.setAttributedString(attributedString)
+
         if attributedString.length == 0 {
-            textView.textStorage?.setAttributedString(NSAttributedString(string: ""))
-            showingPlaceholder = false
-            showPlaceholderIfNeeded()
+            refreshPlaceholder()
             delegate?.textDidChange("")
             delegate?.selectionDidChange()
             return
         }
 
-        textView.textStorage?.setAttributedString(attributedString)
-        showingPlaceholder = false
         textView.setSelectedRange(NSRange(location: attributedString.length, length: 0))
         updateTypingAttributesFromSelection()
         delegate?.textDidChange(textView.string)
         delegate?.selectionDidChange()
     }
 
+    /// The placeholder is never part of the storage, so the storage is the label's
+    /// content, verbatim.
     private var contentPlainText: String {
-        showingPlaceholder ? "" : textView.string
+        textView.string
     }
 
     private func safeSelectedRange() -> NSRange {
@@ -404,7 +647,6 @@ final class EditableLabelContainerView: NSView {
         updateAttributes: (inout [NSAttributedString.Key: Any]) -> Void
     ) {
         guard let textStorage = textView.textStorage else { return }
-        clearPlaceholderIfNeeded()
 
         isUpdatingFromCode = true
         textStorage.beginEditing()
@@ -412,7 +654,9 @@ final class EditableLabelContainerView: NSView {
             textStorage.endEditing()
             isUpdatingFromCode = false
             updateTypingAttributesFromSelection()
-            refreshVerticalAlignment()
+            // Bold and italic change the text's metrics, so the fitted size can
+            // change even though no characters were added or removed.
+            applyAutoFit()
             redrawTextView()
         }
 
@@ -434,25 +678,6 @@ final class EditableLabelContainerView: NSView {
 
     private func updateTypingAttributesFromSelection() {
         textView.typingAttributes = attributesAtInsertionPoint()
-    }
-
-    private func clearPlaceholderIfNeeded() {
-        guard showingPlaceholder else { return }
-
-        let style = delegate?.preferredStyleState() ?? LabelEditorStyleState(
-            fontSize: LabelTypography.defaultFontSize,
-            isBold: false,
-            isItalic: false,
-            isUnderlined: false,
-            alignment: .center
-        )
-
-        isUpdatingFromCode = true
-        textView.textStorage?.setAttributedString(NSAttributedString(string: ""))
-        textView.typingAttributes = typingAttributes(for: style)
-        textView.setSelectedRange(NSRange(location: 0, length: 0))
-        isUpdatingFromCode = false
-        showingPlaceholder = false
     }
 
     private func typingAttributes(for style: LabelEditorStyleState) -> [NSAttributedString.Key: Any] {
@@ -492,19 +717,29 @@ final class EditableLabelContainerView: NSView {
 
         let savedSelection = textView.selectedRange()
 
-        textContainer.containerSize = NSSize(width: labelContentWidth, height: labelContentHeight)
+        let contentSize = availableContentSize
+        textContainer.containerSize = NSSize(width: contentSize.width, height: .greatestFiniteMagnitude)
         layoutManager.ensureLayout(for: textContainer)
 
         let glyphRange = layoutManager.glyphRange(for: textContainer)
         let usedHeight: CGFloat
         if glyphRange.length > 0 {
-            usedHeight = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer).height
+            usedHeight = layoutManager.usedRect(for: textContainer).height
+        } else if let placeholder = labelTextView.placeholder, placeholder.length > 0 {
+            // The placeholder isn't laid out by the text container, so measure it
+            // directly to keep it centered exactly like real text.
+            usedHeight = placeholder.boundingRect(
+                with: NSSize(width: contentSize.width, height: .greatestFiniteMagnitude),
+                options: [.usesLineFragmentOrigin, .usesFontLeading]
+            ).height
         } else {
             usedHeight = LabelTypography.font(size: scaledFontSize(LabelTypography.defaultFontSize), bold: false, italic: false).boundingRectForFont.height
         }
 
         let insetX = horizontalInset
-        let insetY = max(0, (bounds.height - usedHeight) / 2)
+        // Never let centering eat into the label's top and bottom margins, even
+        // when the text is too long to fit at the smallest allowed size.
+        let insetY = max(verticalInset, (bounds.height - usedHeight) / 2)
         let newInset = NSSize(width: insetX, height: insetY)
 
         if abs(insetY - lastVerticalInset) > 0.25 || textView.textContainerInset != newInset {
@@ -527,39 +762,19 @@ final class EditableLabelContainerView: NSView {
 
         guard bounds.height > 0, bounds.size != lastLayoutBounds else { return }
         lastLayoutBounds = bounds.size
-        refreshVerticalAlignment()
+        applyAutoFit()
     }
 }
 
 extension EditableLabelContainerView: NSTextViewDelegate {
-    func textView(_ textView: NSTextView, shouldChangeTextIn affectedCharRange: NSRange, replacementString: String?) -> Bool {
-        guard showingPlaceholder else { return true }
-        clearPlaceholderIfNeeded()
-        return true
-    }
-
-    func textDidBeginEditing(_ notification: Notification) {
-        clearPlaceholderIfNeeded()
-    }
-
     func textDidChange(_ notification: Notification) {
         guard !isUpdatingFromCode else { return }
 
-        if textView.string == LabelTypography.placeholderText {
-            showingPlaceholder = true
-            delegate?.textDidChange("")
-            return
-        }
+        // Catches edits that arrive without a key press, such as a menu paste.
+        labelTextView.markUserInteraction()
 
-        if textView.string.isEmpty {
-            showPlaceholderIfNeeded()
-            delegate?.textDidChange("")
-            return
-        }
-
-        showingPlaceholder = false
-        delegate?.textDidChange(textView.string)
-        refreshVerticalAlignment()
+        delegate?.textDidChange(contentPlainText)
+        applyAutoFit()
     }
 
     func textViewDidChangeSelection(_ notification: Notification) {

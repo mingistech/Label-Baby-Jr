@@ -71,15 +71,24 @@ struct ContentView: View {
                 .font(.headline)
 
             HStack(spacing: 12) {
-                Text("Size")
-                Stepper(value: Binding(
-                    get: { editor.fontSize },
-                    set: { editor.applyFontSize($0) }
-                ), in: 6 ... 36, step: 1) {
-                    Text("\(Int(editor.fontSize)) pt")
-                        .monospacedDigit()
-                        .frame(width: 36, alignment: .trailing)
+                HStack(spacing: 6) {
+                    // An adjacent Stepper claims all the width it is offered, so
+                    // these labels need fixedSize or they collapse to one
+                    // character per line.
+                    Text("Size")
+                        .fixedSize()
+                    Stepper(value: Binding(
+                        get: { editor.isAutoSizeEnabled ? editor.fittedFontSize : editor.selectionFontSize },
+                        set: { editor.applyFontSize($0) }
+                    ), in: LabelTypography.minimumFontSize ... LabelTypography.maximumFontSize, step: 1) {
+                        Text("\(formatted(editor.isAutoSizeEnabled ? editor.fittedFontSize : editor.selectionFontSize)) pt")
+                            .monospacedDigit()
+                            .fixedSize()
+                            .frame(width: 40, alignment: .leading)
+                    }
                 }
+                .fixedSize()
+                .help("Sizes the selected text, or the whole label when nothing is selected. Turns off auto-sizing.")
 
                 Toggle("Bold", isOn: Binding(
                     get: { editor.isBold },
@@ -97,7 +106,38 @@ struct ContentView: View {
                 Spacer(minLength: 0)
             }
             .toggleStyle(.checkbox)
+
+            HStack(spacing: 16) {
+                Toggle("Auto-size to fit", isOn: Binding(
+                    get: { editor.isAutoSizeEnabled },
+                    set: { editor.setAutoSizeEnabled($0) }
+                ))
+                .toggleStyle(.checkbox)
+
+                HStack(spacing: 6) {
+                    Text("Max size")
+                        .fixedSize()
+                    Stepper(value: Binding(
+                        get: { editor.maximumFontSize },
+                        set: { editor.setMaximumFontSize($0) }
+                    ), in: LabelTypography.minimumFontSize ... LabelTypography.maximumFontSize, step: 1) {
+                        Text("\(Int(editor.maximumFontSize)) pt")
+                            .monospacedDigit()
+                            .fixedSize()
+                            .frame(width: 40, alignment: .leading)
+                    }
+                }
+                .fixedSize()
+                .foregroundStyle(editor.isAutoSizeEnabled ? .primary : .secondary)
+                .disabled(!editor.isAutoSizeEnabled)
+
+                Spacer(minLength: 0)
+            }
         }
+    }
+
+    private func formatted(_ size: CGFloat) -> String {
+        size == size.rounded() ? "\(Int(size))" : String(format: "%.1f", size)
     }
 
     private var alignmentSection: some View {
@@ -129,7 +169,33 @@ struct ContentView: View {
                 EditableLabelView(controller: editor)
                 Spacer(minLength: 0)
             }
+
+            HStack(spacing: 6) {
+                if editor.isTextOverflowing {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    Text(overflowMessage)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if editor.isAutoSizeEnabled {
+                    Text("Auto-sized to \(formatted(editor.fittedFontSize)) pt to fit the label.")
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Text("Sized by hand at \(formatted(editor.fittedFontSize)) pt. Auto-sizing is off.")
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
+    }
+
+    private var overflowMessage: String {
+        if editor.isAutoSizeEnabled {
+            return "Too long to fit at \(Int(LabelTypography.minimumFontSize)) pt — shorten the text or remove a line."
+        }
+        return "Too big to fit — reduce the size or turn auto-size back on."
     }
 
     private var printerSection: some View {

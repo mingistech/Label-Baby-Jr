@@ -1,5 +1,3 @@
-<img src="https://raw.githubusercontent.com/mingistech/Label-Baby-Jr/main/docs/app-icon.png" width="128" height="128" alt="Label Baby Jr app icon">
-
 # Label Baby Jr
 
 A native macOS app for designing and printing rich-text labels on DYMO label printers.

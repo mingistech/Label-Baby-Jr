@@ -14,21 +14,12 @@ struct LabelEditorStyleState {
 
 struct EditableLabelView: View {
     let controller: LabelEditorController
-    private let previewScale: CGFloat = 1.5
+    private let previewScale: CGFloat = 1.72
 
     var body: some View {
-        let previewWidth = LabelTypography.widthPoints * previewScale
-        let previewHeight = LabelTypography.heightPoints * previewScale
-
-        EditableLabelViewRepresentable(controller: controller, previewScale: previewScale)
-            .frame(width: previewWidth, height: previewHeight)
-            .background(Color.white)
-            .clipShape(RoundedRectangle(cornerRadius: 4))
-            .overlay {
-                RoundedRectangle(cornerRadius: 4)
-                    .strokeBorder(Color.accentColor.opacity(0.45), lineWidth: 1)
-                    .allowsHitTesting(false)
-            }
+        LabelStockPreview(previewScale: previewScale, borderColor: Color.accentColor.opacity(0.4)) {
+            EditableLabelViewRepresentable(controller: controller, previewScale: previewScale)
+        }
     }
 }
 
@@ -192,6 +183,10 @@ final class EditableLabelContainerView: NSView {
             width: LabelTypography.widthPoints * previewScale,
             height: LabelTypography.heightPoints * previewScale
         ))
+        wantsLayer = true
+        layer?.cornerRadius = LabelTypography.cornerRadiusPoints * previewScale
+        layer?.masksToBounds = true
+        layer?.backgroundColor = NSColor.white.cgColor
         setupTextView()
     }
 
@@ -203,8 +198,13 @@ final class EditableLabelContainerView: NSView {
     override var isFlipped: Bool { true }
 
     override func draw(_ dirtyRect: NSRect) {
+        let path = NSBezierPath(
+            roundedRect: bounds,
+            xRadius: LabelTypography.cornerRadiusPoints * previewScale,
+            yRadius: LabelTypography.cornerRadiusPoints * previewScale
+        )
         NSColor.white.setFill()
-        dirtyRect.fill()
+        path.fill()
         super.draw(dirtyRect)
     }
 
@@ -219,6 +219,9 @@ final class EditableLabelContainerView: NSView {
         textView.isAutomaticQuoteSubstitutionEnabled = false
         textView.isAutomaticDashSubstitutionEnabled = false
         textView.isAutomaticTextReplacementEnabled = false
+        // Opt out of Writing Tools / the floating Apple Intelligence affordance
+        // that macOS shows beside the caret in text views.
+        textView.writingToolsBehavior = .none
         textView.isHorizontallyResizable = false
         textView.isVerticallyResizable = false
         textView.autoresizingMask = [.width, .height]
@@ -468,20 +471,10 @@ final class EditableLabelContainerView: NSView {
             alignment: .center
         )
 
-        // The placeholder is auto-fitted with the same sizer as real text, so it
-        // can't spill past the label's margins either.
-        let ceiling = max(LabelTypography.minimumFontSize, style.fontSize)
         let alignment = style.alignment.nsAlignment
-        let fit = autoFitSizer.fit(
-            LabelTypography.placeholderAttributedString(alignment: alignment, fontSize: scaledFontSize(ceiling)),
-            in: availableContentSize,
-            previewScale: previewScale,
-            sizeRange: LabelTypography.minimumFontSize ... ceiling
-        )
-
         labelTextView.placeholder = LabelTypography.placeholderAttributedString(
             alignment: alignment,
-            fontSize: scaledFontSize(fit.fontSize)
+            fontSize: scaledFontSize(LabelTypography.placeholderFontSize)
         )
 
         // With nothing typed yet, the next character should arrive at the label's
@@ -537,15 +530,17 @@ final class EditableLabelContainerView: NSView {
 
     func applyAlignment(_ alignment: LabelTextAlignment) {
         guard let textStorage = textView.textStorage else { return }
-        guard textStorage.length > 0 else {
-            // Nothing typed yet: re-align the placeholder and the typing
-            // attributes the first character will pick up.
+
+        if textStorage.length == 0 {
+            // Nothing typed yet: align the placeholder and the typing attributes
+            // the first character will pick up.
+            applyAlignmentToTypingAttributes(alignment)
             refreshPlaceholder()
             return
         }
 
         applyAlignmentToAllText(alignment)
-        updateTypingAttributesFromSelection()
+        applyAlignmentToTypingAttributes(alignment)
         applyAutoFit()
     }
 
@@ -625,11 +620,16 @@ final class EditableLabelContainerView: NSView {
             return textStorage.attributes(at: location, effectiveRange: nil)
         }
 
-        if selection.location >= textStorage.length {
-            return textView.typingAttributes
+        // Caret with no selection: inherit from the character just before the
+        // caret. Reading `typingAttributes` when the caret sits at the end of
+        // the storage (the usual case after typing) was returning a stale
+        // paragraph style, so the alignment control snapped back to Center and
+        // refused to select it again.
+        if selection.location > 0 {
+            return textStorage.attributes(at: min(selection.location - 1, textStorage.length - 1), effectiveRange: nil)
         }
 
-        return textStorage.attributes(at: selection.location, effectiveRange: nil)
+        return textStorage.attributes(at: 0, effectiveRange: nil)
     }
 
     private func mutateFontTrait(_ trait: NSFontTraitMask, enabled: Bool) {
@@ -693,16 +693,46 @@ final class EditableLabelContainerView: NSView {
     private func applyAlignmentToAllText(_ alignment: LabelTextAlignment) {
         guard let textStorage = textView.textStorage, textStorage.length > 0 else { return }
 
-        let paragraphStyle = NSMutableParagraphStyle()
-        paragraphStyle.alignment = alignment.nsAlignment
-        paragraphStyle.lineBreakMode = .byWordWrapping
+        let fullRange = NSRange(location: 0, length: textStorage.length)
+        var replacements: [(range: NSRange, style: NSParagraphStyle)] = []
+
+        // Mutate each existing paragraph style in place so we keep indents and
+        // spacing AppKit may have attached, instead of replacing them with a
+        // bare style that can trip layout exceptions.
+        textStorage.enumerateAttribute(.paragraphStyle, in: fullRange, options: []) { value, range, _ in
+            let mutable = ((value as? NSParagraphStyle)?.mutableCopy() as? NSMutableParagraphStyle)
+                ?? NSMutableParagraphStyle()
+            mutable.alignment = alignment.nsAlignment
+            mutable.lineBreakMode = .byWordWrapping
+            replacements.append((range, mutable))
+        }
+
+        if replacements.isEmpty {
+            let paragraphStyle = NSMutableParagraphStyle()
+            paragraphStyle.alignment = alignment.nsAlignment
+            paragraphStyle.lineBreakMode = .byWordWrapping
+            replacements.append((fullRange, paragraphStyle))
+        }
 
         isUpdatingFromCode = true
-        textStorage.addAttribute(
-            .paragraphStyle,
-            value: paragraphStyle,
-            range: NSRange(location: 0, length: textStorage.length)
-        )
+        textStorage.beginEditing()
+        for replacement in replacements {
+            textStorage.addAttribute(.paragraphStyle, value: replacement.style, range: replacement.range)
+        }
+        textStorage.endEditing()
+        isUpdatingFromCode = false
+    }
+
+    private func applyAlignmentToTypingAttributes(_ alignment: LabelTextAlignment) {
+        var attributes = textView.typingAttributes
+        let paragraphStyle = ((attributes[.paragraphStyle] as? NSParagraphStyle)?.mutableCopy() as? NSMutableParagraphStyle)
+            ?? NSMutableParagraphStyle()
+        paragraphStyle.alignment = alignment.nsAlignment
+        paragraphStyle.lineBreakMode = .byWordWrapping
+        attributes[.paragraphStyle] = paragraphStyle
+
+        isUpdatingFromCode = true
+        textView.typingAttributes = attributes
         isUpdatingFromCode = false
     }
 
@@ -715,7 +745,7 @@ final class EditableLabelContainerView: NSView {
         isUpdatingVerticalAlignment = true
         defer { isUpdatingVerticalAlignment = false }
 
-        let savedSelection = textView.selectedRange()
+        let savedSelection = safeSelectedRange()
 
         let contentSize = availableContentSize
         textContainer.containerSize = NSSize(width: contentSize.width, height: .greatestFiniteMagnitude)
@@ -746,9 +776,14 @@ final class EditableLabelContainerView: NSView {
             lastVerticalInset = insetY
             isUpdatingFromCode = true
             textView.textContainerInset = newInset
-            if savedSelection.location != NSNotFound {
-                textView.setSelectedRange(savedSelection)
-            }
+            let clamped = safeSelectedRange()
+            // Prefer the pre-layout caret when it still lands inside the storage;
+            // otherwise fall back to the clamped range so setSelectedRange never
+            // receives an out-of-bounds NSRange after an attribute rewrite.
+            let selection = NSMaxRange(savedSelection) <= (textView.textStorage?.length ?? 0)
+                ? savedSelection
+                : clamped
+            textView.setSelectedRange(selection)
             isUpdatingFromCode = false
             redrawTextView()
         }

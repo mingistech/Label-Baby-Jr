@@ -162,6 +162,16 @@ final class LabelEditorController: ObservableObject {
         editor?.attributedStringForPrinting()
     }
 
+    /// Writes the current editor contents through `onDocumentContentChanged`
+    /// immediately, cancelling any pending debounced save. Used before Save so
+    /// the file on disk matches what is on screen.
+    func flushPendingDocumentChanges() {
+        guard !isLoadingDocument else { return }
+        documentSaveTask?.cancel()
+        documentSaveTask = nil
+        onDocumentContentChanged?()
+    }
+
     private func notifyDocumentContentChanged() {
         guard !isLoadingDocument else { return }
 

@@ -4,12 +4,12 @@ import AppKit
 enum LabelDocumentActions {
     @MainActor
     static func createNewLabel() {
-        NSDocumentController.shared.newDocument(nil)
+        LabelWorkspace.shared.newLabel()
     }
 
     @MainActor
     static func openLabel(at url: URL) {
-        NSDocumentController.shared.openDocument(withContentsOf: url, display: true) { _, _, _ in }
+        LabelWorkspace.shared.openLabel(at: url)
     }
 }
 #endif

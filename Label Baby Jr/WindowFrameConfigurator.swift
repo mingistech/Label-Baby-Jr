@@ -4,9 +4,19 @@ import SwiftUI
 
 /// Locks the window to the content's natural size and removes visible title bar chrome.
 struct WindowFrameConfigurator: NSViewRepresentable {
+    /// When true, closing this window asks to save if the label has unsaved edits.
+    var promptsToSaveOnClose = false
+
     private final class WindowState {
         var didConfigureChrome = false
         var appliedSize = NSSize.zero
+        var closeDelegate: ClosePromptDelegate?
+    }
+
+    final class ClosePromptDelegate: NSObject, NSWindowDelegate {
+        func windowShouldClose(_ sender: NSWindow) -> Bool {
+            LabelWorkspace.shared.confirmCloseIfNeeded()
+        }
     }
 
     private static var states = NSMapTable<NSWindow, WindowState>.weakToStrongObjects()
@@ -47,8 +57,18 @@ struct WindowFrameConfigurator: NSViewRepresentable {
             window.titlebarAppearsTransparent = true
             window.titlebarSeparatorStyle = .none
             window.isMovableByWindowBackground = true
-            window.backgroundColor = AppTheme.windowBackgroundColor
             state.didConfigureChrome = true
+        }
+
+        // Dynamic AppTheme color — reapply so Light / Dark / System switches
+        // refresh the titlebar fill, not only the SwiftUI content.
+        window.backgroundColor = AppTheme.windowBackgroundColor
+
+
+        if promptsToSaveOnClose, state.closeDelegate == nil {
+            let delegate = ClosePromptDelegate()
+            state.closeDelegate = delegate
+            window.delegate = delegate
         }
 
         contentView.layoutSubtreeIfNeeded()

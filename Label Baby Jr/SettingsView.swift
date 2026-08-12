@@ -6,31 +6,16 @@ struct SettingsView: View {
     @ObservedObject private var settings = AppSettings.shared
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Settings")
-                .font(.title2.weight(.bold))
-
-            Form {
-                Section {
-                    Picker("At launch open", selection: $settings.launchBehavior) {
-                        ForEach(LaunchBehavior.allCases) { behavior in
-                            Text(behavior.title).tag(behavior)
-                        }
-                    }
-                    .pickerStyle(.radioGroup)
-
-                    Text(settings.launchBehavior.detail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                } footer: {
-                    Text("This preference takes effect the next time you open Label Baby Jr.")
+        Form {
+            Picker("Appearance", selection: $settings.appearance) {
+                ForEach(AppSettings.Appearance.allCases) { option in
+                    Text(option.title).tag(option)
                 }
             }
-            .formStyle(.grouped)
+            .pickerStyle(.segmented)
         }
-        .frame(width: 440, height: 240)
-        .padding(20)
+        .formStyle(.grouped)
+        .frame(width: 420, height: 120)
         .background(SettingsWindowConfigurator())
     }
 }
@@ -52,8 +37,8 @@ private struct SettingsWindowConfigurator: NSViewRepresentable {
 
     private func configureWindow(for view: NSView) {
         guard let window = view.window else { return }
-        window.title = ""
-        window.titleVisibility = .hidden
+        window.title = "Settings"
+        window.titleVisibility = .visible
     }
 }
 

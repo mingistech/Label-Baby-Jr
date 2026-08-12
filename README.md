@@ -62,6 +62,10 @@ Labels are saved as JSON documents describing the label size and an ordered list
 | `LabelTypography.swift` | Shared label size, font, and margin constants |
 | `LabelAutoFitSizer.swift` | Binary-search sizer that finds the largest whole-point font that still fits |
 
+## Contributors
+
+- [Brandon Thompson](https://github.com/mingistech) ([@mingistech](https://github.com/mingistech))
+
 ## License
 
 Released under the [MIT License](LICENSE).

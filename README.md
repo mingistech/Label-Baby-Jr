@@ -4,7 +4,7 @@ A native macOS app for designing and printing rich-text labels on DYMO label pri
 
 Label Baby Jr is a lightweight label editor built with SwiftUI and AppKit. It's purpose-built for a single label size (89×28mm, DYMO's standard) with a focused set of rich text formatting tools, so you can go from a blank label to a printed one in seconds.
 
-<img src="https://raw.githubusercontent.com/mingistech/Label-Baby-Jr/f8a7b61f6ee26782c6d3178eefce33899fc8b20a/docs/preview-autofit.png" alt="Label Baby Jr editor screenshot" width="532">
+<img src="https://raw.githubusercontent.com/mingistech/Label-Baby-Jr/main/docs/preview-1.2.png" alt="Label Baby Jr editor screenshot" width="600">
 
 ## Features
 

@@ -4,30 +4,43 @@ import SwiftUI
 struct LabelBabyJrApp: App {
     #if os(macOS)
     @NSApplicationDelegateAdaptor(LabelBabyJrAppDelegate.self) private var appDelegate
+    @ObservedObject private var workspace = LabelWorkspace.shared
     #endif
 
     var body: some Scene {
         #if os(macOS)
-        let launchBehavior = AppSettings.shared.launchBehavior
-
-        WindowGroup("Label Baby Jr", id: "home") {
-            HomeView()
+        WindowGroup("Label Baby Jr") {
+            ContentView()
                 .environmentObject(RecentLabelsStore.shared)
+                .environmentObject(workspace)
         }
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentSize)
-        .defaultLaunchBehavior(launchBehavior == .recentLabelsPicker ? .presented : .suppressed)
+        .commands {
+            CommandGroup(replacing: .newItem) {
+                Button("New Label") {
+                    workspace.newLabel()
+                }
+                .keyboardShortcut("n")
 
-        DocumentGroup(newDocument: LabelBabyJrDocument()) { configuration in
-            ContentView(
-                document: configuration.$document,
-                fileURL: configuration.fileURL
-            )
-            .environmentObject(RecentLabelsStore.shared)
+                Button("Open…") {
+                    workspace.openInteractive()
+                }
+                .keyboardShortcut("o")
+            }
+
+            CommandGroup(replacing: .saveItem) {
+                Button("Save") {
+                    workspace.save()
+                }
+                .keyboardShortcut("s")
+
+                Button("Save As…") {
+                    workspace.saveAs()
+                }
+                .keyboardShortcut("S")
+            }
         }
-        .windowStyle(.hiddenTitleBar)
-        .windowResizability(.contentSize)
-        .defaultLaunchBehavior(.suppressed)
 
         Settings {
             SettingsView()

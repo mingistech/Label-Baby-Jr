@@ -2,18 +2,34 @@
 import AppKit
 import Combine
 
-struct RecentLabelItem: Identifiable {
+struct RecentLabelItem: Identifiable, Equatable {
     var id: URL { url }
     let url: URL
     let displayName: String
     let previewFile: LabelBabyJrFile
+    /// Pre-rendered once when the item is built so sidebar redraws don't rebuild
+    /// attributed strings on every highlight change.
+    let previewAttributedString: NSAttributedString
+
+    static func == (lhs: RecentLabelItem, rhs: RecentLabelItem) -> Bool {
+        lhs.url.standardizedFileURL == rhs.url.standardizedFileURL
+            && lhs.displayName == rhs.displayName
+            && lhs.previewFile == rhs.previewFile
+    }
+
+    init(url: URL, displayName: String, previewFile: LabelBabyJrFile) {
+        self.url = url
+        self.displayName = displayName
+        self.previewFile = previewFile
+        self.previewAttributedString = previewFile.makeAttributedString()
+    }
 }
 
 @MainActor
 final class RecentLabelsStore: ObservableObject {
     static let shared = RecentLabelsStore()
 
-    static let maxRecentCount = 6
+    static let maxRecentCount = 12
     private static let bookmarksKey = "recentLabelBookmarks"
 
     @Published private(set) var items: [RecentLabelItem] = []
@@ -21,43 +37,62 @@ final class RecentLabelsStore: ObservableObject {
     private init() {}
 
     func refresh() {
-        // Merge in the URLs of any currently-open label windows. This makes the
-        // list self-healing: SwiftUI's `DocumentGroup` configuration doesn't
-        // always re-notify an already-rendered view when a brand-new document
-        // is saved for the first time, so relying solely on the explicit
-        // `recordDocument` call can miss recently created labels. The live
-        // document list is always accurate, since it comes straight from
-        // AppKit rather than a SwiftUI snapshot.
         var urls = Self.loadBookmarkedURLs()
-        for url in Self.currentlyOpenLabelURLs().reversed() {
-            let normalized = url.standardizedFileURL
+
+        if let openURL = LabelWorkspace.shared.fileURL {
+            let normalized = openURL.standardizedFileURL
             urls.removeAll { $0.standardizedFileURL == normalized }
-            urls.insert(url, at: 0)
+            urls.insert(openURL, at: 0)
         }
+
         urls = Array(urls.prefix(Self.maxRecentCount))
 
-        items = urls.map { item(for: $0) }
+        // Reuse already-decoded previews whenever the URL hasn't changed, so a
+        // refresh after opening one label doesn't re-read every recent file.
+        let existing = Dictionary(uniqueKeysWithValues: items.map {
+            ($0.url.standardizedFileURL, $0)
+        })
+        items = urls.map { url in
+            let normalized = url.standardizedFileURL
+            if let cached = existing[normalized] {
+                return cached
+            }
+            return makeItem(for: url)
+        }
         Self.saveBookmarkedURLs(urls)
     }
 
-    private static func currentlyOpenLabelURLs() -> [URL] {
-        NSDocumentController.shared.documents.compactMap { document in
-            guard let url = document.fileURL, url.pathExtension.lowercased() == "labelbabyjr" else { return nil }
-            return url
+    /// Moves an already-loaded item to the top without touching the disk.
+    func promote(_ item: RecentLabelItem) {
+        let normalized = item.url.standardizedFileURL
+        var next = items.filter { $0.url.standardizedFileURL != normalized }
+        next.insert(item, at: 0)
+        if next.count > Self.maxRecentCount {
+            next = Array(next.prefix(Self.maxRecentCount))
         }
+        items = next
+        Self.saveBookmarkedURLs(next.map(\.url))
+        NSDocumentController.shared.noteNewRecentDocumentURL(item.url)
     }
 
-    func recordDocument(at url: URL) {
-        var urls = Self.loadBookmarkedURLs()
+    func recordDocument(at url: URL, file: LabelBabyJrFile? = nil) {
         let normalized = url.standardizedFileURL
-        urls.removeAll { $0.standardizedFileURL == normalized }
-        urls.insert(url, at: 0)
-        Self.saveBookmarkedURLs(Array(urls.prefix(Self.maxRecentCount)))
-        NSDocumentController.shared.noteNewRecentDocumentURL(url)
-        refresh()
+        let item: RecentLabelItem
+        if let file {
+            item = RecentLabelItem(
+                url: url,
+                displayName: url.deletingPathExtension().lastPathComponent,
+                previewFile: file
+            )
+        } else if let existing = items.first(where: { $0.url.standardizedFileURL == normalized }) {
+            item = existing
+        } else {
+            item = makeItem(for: url)
+        }
+        promote(item)
     }
 
-    private func item(for url: URL) -> RecentLabelItem {
+    private func makeItem(for url: URL) -> RecentLabelItem {
         let accessed = url.startAccessingSecurityScopedResource()
         defer {
             if accessed {

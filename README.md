@@ -2,19 +2,19 @@
 
 A native macOS app for designing and printing rich-text labels on DYMO label printers.
 
-Label Baby Jr is a lightweight, document-based label editor built with SwiftUI and AppKit. It's purpose-built for a single label size (89×28mm, DYMO's standard) with a focused set of rich text formatting tools, so you can go from a blank label to a printed one in seconds.
+Label Baby Jr is a lightweight label editor built with SwiftUI and AppKit. It's purpose-built for a single label size (89×28mm, DYMO's standard) with a focused set of rich text formatting tools, so you can go from a blank label to a printed one in seconds.
 
 <img src="https://raw.githubusercontent.com/mingistech/Label-Baby-Jr/f8a7b61f6ee26782c6d3178eefce33899fc8b20a/docs/preview-autofit.png" alt="Label Baby Jr editor screenshot" width="532">
 
 ## Features
 
+- **Single-window workspace** — Recents sidebar and label editor share one window
 - **Rich text editing** — bold, italic, underline, font size, and left/center/right alignment
-- **Auto-sizing text** — text starts large and shrinks as you type so it always fits the label; pick a max size, or turn auto-size off and set sizes by hand
-- **WYSIWYG label preview** — an enlarged, print-accurate editor view of the 89×28mm label
-- **DYMO printing** — printer picker (automatically filtered to DYMO printers only) with a copies stepper
-- **Document-based** — labels are saved as `.labelbabyjr` files (a simple JSON format) and integrate with macOS's standard Open Recent / document handling
-- **Home screen** — a recent labels picker showing thumbnail previews, with a "Create New Label" button
-- **Settings** — choose whether the app launches to the recent labels picker or a blank new label
+- **Auto fit** — text starts large and shrinks as you type so it always fits the label; turn it off to size by hand
+- **WYSIWYG label preview** — an enlarged, print-accurate editor view of the 89×28mm die-cut label
+- **DYMO printing** — printer picker (filtered to DYMO printers) with copies on the same row
+- **Documents** — save and open `.labelbabyjr` files (JSON); File → New / Open / Save / Save As
+- **Appearance** — Light, Dark, or Follow System in Settings
 
 ## Requirements
 
@@ -49,14 +49,16 @@ Labels are saved as JSON documents describing the label size and an ordered list
 
 | File | Responsibility |
 | --- | --- |
-| `LabelBabyJrApp.swift` | App entry point; sets up the home window and the document-based editor scene |
-| `ContentView.swift` | Editor screen; binds the document to the `LabelEditorController` |
+| `LabelBabyJrApp.swift` | App entry point; single editor window and File menu commands |
+| `LabelWorkspace.swift` | Open / save / new document session and dirty-state prompts |
+| `ContentView.swift` | Editor chrome; binds the workspace to `LabelEditorController` |
+| `RecentLabelsSidebar.swift` | Scrollable recent-label previews (click to select, double-click to open) |
 | `EditableLabelView.swift` | The `NSTextView`-backed rich text editor and its SwiftUI wrapper |
 | `LabelEditorController.swift` | Editor state (style, selection) and document change notifications |
 | `LabelBabyJrDocument.swift` / `LabelBabyJrFileFormat.swift` | Document type and the `.labelbabyjr` file format |
 | `PrinterService.swift` / `LabelPrintView.swift` | DYMO printer discovery and print rendering |
-| `HomeView.swift` / `RecentLabelsStore.swift` | Recent labels home screen and persistence |
-| `SettingsView.swift` / `AppSettings.swift` | App preferences |
+| `LabelStockPreview.swift` | Die-cut label silhouette used in the editor and thumbnails |
+| `SettingsView.swift` / `AppSettings.swift` | Appearance and other preferences |
 | `LabelTypography.swift` | Shared label size, font, and margin constants |
 | `LabelAutoFitSizer.swift` | Binary-search sizer that finds the largest whole-point font that still fits |
 

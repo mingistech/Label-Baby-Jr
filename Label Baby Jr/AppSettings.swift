@@ -1,49 +1,59 @@
 #if os(macOS)
+import AppKit
 import Combine
 import SwiftUI
-
-enum LaunchBehavior: String, CaseIterable, Identifiable, Codable {
-    case recentLabelsPicker
-    case newDocumentEditor
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .recentLabelsPicker: "Recent Labels"
-        case .newDocumentEditor: "New Label Editor"
-        }
-    }
-
-    var detail: String {
-        switch self {
-        case .recentLabelsPicker:
-            "Show the recent labels picker when Label Baby Jr opens."
-        case .newDocumentEditor:
-            "Open a blank label editor when Label Baby Jr opens."
-        }
-    }
-}
 
 @MainActor
 final class AppSettings: ObservableObject {
     static let shared = AppSettings()
 
-    private static let launchBehaviorKey = "launchBehavior"
+    enum Appearance: String, CaseIterable, Identifiable {
+        case system
+        case light
+        case dark
 
-    @Published var launchBehavior: LaunchBehavior {
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .system: return "Follow System"
+            case .light: return "Light"
+            case .dark: return "Dark"
+            }
+        }
+
+        var nsAppearance: NSAppearance? {
+            switch self {
+            case .system: return nil
+            case .light: return NSAppearance(named: .aqua)
+            case .dark: return NSAppearance(named: .darkAqua)
+            }
+        }
+    }
+
+    private enum Keys {
+        static let appearance = "settings.appearance"
+    }
+
+    @Published var appearance: Appearance {
         didSet {
-            UserDefaults.standard.set(launchBehavior.rawValue, forKey: Self.launchBehaviorKey)
+            guard oldValue != appearance else { return }
+            UserDefaults.standard.set(appearance.rawValue, forKey: Keys.appearance)
+            applyAppearance()
         }
     }
 
     private init() {
-        if let rawValue = UserDefaults.standard.string(forKey: Self.launchBehaviorKey),
-           let behavior = LaunchBehavior(rawValue: rawValue) {
-            launchBehavior = behavior
+        if let raw = UserDefaults.standard.string(forKey: Keys.appearance),
+           let stored = Appearance(rawValue: raw) {
+            appearance = stored
         } else {
-            launchBehavior = .recentLabelsPicker
+            appearance = .system
         }
+    }
+
+    func applyAppearance() {
+        NSApp.appearance = appearance.nsAppearance
     }
 }
 #endif

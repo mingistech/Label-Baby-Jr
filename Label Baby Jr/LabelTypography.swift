@@ -45,6 +45,10 @@ enum LabelTypography {
     static let defaultFontSize: CGFloat = 14
     static let placeholderText = "Type here"
 
+    /// Hint size for the empty-label placeholder. Kept well below the auto-fit
+    /// ceiling so "Type here" reads as guidance rather than filling the stock.
+    static let placeholderFontSize: CGFloat = 25
+
     /// A fixed gray rather than a dynamic system color: the label is always white
     /// paper, so a color that adapts to the app's dark theme would render nearly
     /// invisible on it.
@@ -62,10 +66,18 @@ enum LabelTypography {
     /// twitching as the measured size crosses a threshold.
     static let fontSizeQuantum: CGFloat = 1
 
-    /// The real, print-accurate margins applied when rendering the label for
-    /// the printer. The on-screen editor scales these by its preview zoom
-    /// factor so the displayed margin always matches the printed margin.
-    static let horizontalMarginPoints: CGFloat = 1
+    /// Die-cut corner radius of a standard DYMO 89×28mm address label (~3.5mm).
+    /// The preview silhouette and the text safe-area both key off this value.
+    static let cornerRadiusMillimeters: CGFloat = 3.5
+    static let cornerRadiusPoints = cornerRadiusMillimeters * 72.0 / 25.4
+
+    /// Left/right inset for editable and printed text. Matches the corner radius
+    /// so the text box ends where the die-cut curve begins, instead of running
+    /// into the rounded ends of the label.
+    static let horizontalMarginPoints: CGFloat = cornerRadiusPoints
+
+    /// Top/bottom inset for editable and printed text. Kept small so Auto fit
+    /// can still use most of the label's height.
     static let verticalMarginPoints: CGFloat = 2
 
     static func font(size: CGFloat, bold: Bool, italic: Bool) -> NSFont {

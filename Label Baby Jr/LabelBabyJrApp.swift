@@ -5,6 +5,7 @@ struct LabelBabyJrApp: App {
     #if os(macOS)
     @NSApplicationDelegateAdaptor(LabelBabyJrAppDelegate.self) private var appDelegate
     @ObservedObject private var workspace = LabelWorkspace.shared
+    @ObservedObject private var updateChecker = UpdateChecker.shared
     #endif
 
     var body: some Scene {
@@ -13,10 +14,24 @@ struct LabelBabyJrApp: App {
             ContentView()
                 .environmentObject(RecentLabelsStore.shared)
                 .environmentObject(workspace)
+                .onAppear {
+                    Task {
+                        await updateChecker.checkForUpdatesIfDue()
+                    }
+                }
         }
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentSize)
         .commands {
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates…") {
+                    Task {
+                        await updateChecker.checkForUpdates()
+                    }
+                }
+                .disabled(updateChecker.isChecking)
+            }
+
             CommandGroup(replacing: .newItem) {
                 Button("New Label") {
                     workspace.newLabel()

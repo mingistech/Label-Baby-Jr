@@ -29,6 +29,12 @@ Label Baby Jr is a lightweight label editor built with SwiftUI and AppKit. It's 
 
 To build a distributable, signed, and notarized copy for sharing outside the Mac App Store, archive via **Product → Archive**, then use Xcode's Organizer to distribute with **Direct Distribution** (Developer ID signing + notarization).
 
+## Updates
+
+When the app is running, it silently checks at most once every two weeks for the latest stable [GitHub Release](https://github.com/mingistech/Label-Baby-Jr/releases). If a newer release is available, it offers to open that release page in the default browser; installation remains manual. Choose **Label Baby Jr → Check for Updates…** to check immediately and see the result.
+
+Publish each version as a GitHub Release using a numeric tag such as `v1.3.0` and attach the signed, notarized `.dmg` or `.zip` for users to download. Commits pushed to `main` do not appear as app updates until they are published as a Release.
+
 ## The `.labelbabyjr` file format
 
 Labels are saved as JSON documents describing the label size and an ordered list of text "runs," where each run carries its own font size, bold/italic/underline flags, and alignment:

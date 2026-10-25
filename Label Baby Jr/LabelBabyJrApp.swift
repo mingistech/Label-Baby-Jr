@@ -91,6 +91,6 @@ struct LabelBabyJrApp: App {
 #if os(macOS)
 private enum AppLinks {
     static let support = URL(string: "https://github.com/mingistech/Label-Baby-Jr/issues")!
-    static let privacyPolicy = URL(string: "https://github.com/mingistech/Label-Baby-Jr/blob/codex/app-store-readiness/PRIVACY.md")!
+    static let privacyPolicy = URL(string: "https://github.com/mingistech/Label-Baby-Jr/blob/main/PRIVACY.md")!
 }
 #endif

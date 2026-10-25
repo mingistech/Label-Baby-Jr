@@ -1,3 +1,6 @@
+#if os(macOS)
+import AppKit
+#endif
 import SwiftUI
 
 @main
@@ -5,7 +8,9 @@ struct LabelBabyJrApp: App {
     #if os(macOS)
     @NSApplicationDelegateAdaptor(LabelBabyJrAppDelegate.self) private var appDelegate
     @ObservedObject private var workspace = LabelWorkspace.shared
+    #if !APP_STORE
     @ObservedObject private var updateChecker = UpdateChecker.shared
+    #endif
     #endif
 
     var body: some Scene {
@@ -15,14 +20,17 @@ struct LabelBabyJrApp: App {
                 .environmentObject(RecentLabelsStore.shared)
                 .environmentObject(workspace)
                 .onAppear {
+                    #if !APP_STORE
                     Task {
                         await updateChecker.checkForUpdatesIfDue()
                     }
+                    #endif
                 }
         }
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentSize)
         .commands {
+            #if !APP_STORE
             CommandGroup(after: .appInfo) {
                 Button("Check for Updates…") {
                     Task {
@@ -31,6 +39,7 @@ struct LabelBabyJrApp: App {
                 }
                 .disabled(updateChecker.isChecking)
             }
+            #endif
 
             CommandGroup(replacing: .newItem) {
                 Button("New Label") {
@@ -55,6 +64,16 @@ struct LabelBabyJrApp: App {
                 }
                 .keyboardShortcut("S")
             }
+
+            CommandGroup(after: .help) {
+                Button("Label Baby Jr Support") {
+                    NSWorkspace.shared.open(AppLinks.support)
+                }
+
+                Button("Privacy Policy") {
+                    NSWorkspace.shared.open(AppLinks.privacyPolicy)
+                }
+            }
         }
 
         Settings {
@@ -68,3 +87,10 @@ struct LabelBabyJrApp: App {
         #endif
     }
 }
+
+#if os(macOS)
+private enum AppLinks {
+    static let support = URL(string: "https://github.com/mingistech/Label-Baby-Jr/issues")!
+    static let privacyPolicy = URL(string: "https://github.com/mingistech/Label-Baby-Jr/blob/codex/app-store-readiness/PRIVACY.md")!
+}
+#endif

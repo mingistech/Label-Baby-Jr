@@ -130,6 +130,13 @@ final class LabelWorkspace: ObservableObject {
     }
 
     private func write(to url: URL) -> Bool {
+        let accessed = url.startAccessingSecurityScopedResource()
+        defer {
+            if accessed {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+
         do {
             let data = try document.file.encodedData()
             try data.write(to: url, options: .atomic)

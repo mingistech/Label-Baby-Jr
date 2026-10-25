@@ -27,13 +27,15 @@ Label Baby Jr is a lightweight label editor built with SwiftUI and AppKit. It's 
 2. Select the **Label Baby Jr** scheme with the **My Mac** run destination.
 3. Build and run (`⌘R`).
 
-To build a distributable, signed, and notarized copy for sharing outside the Mac App Store, archive via **Product → Archive**, then use Xcode's Organizer to distribute with **Direct Distribution** (Developer ID signing + notarization).
+This branch prepares the Mac App Store edition. Archive via **Product → Archive**, then use Xcode Organizer's **TestFlight & App Store** distribution workflow. Complete the account-side and review tasks in [`APP_STORE_SUBMISSION.md`](APP_STORE_SUBMISSION.md) before uploading.
 
 ## Updates
 
-When the app is running, it silently checks at most once every two weeks for the latest stable [GitHub Release](https://github.com/mingistech/Label-Baby-Jr/releases). If a newer release is available, it offers to open that release page in the default browser; installation remains manual. Choose **Label Baby Jr → Check for Updates…** to check immediately and see the result.
+The Mac App Store edition receives updates through the Mac App Store. Its build defines `APP_STORE`, so the automatic GitHub request and the **Check for Updates…** command are excluded from the compiled app.
 
-Publish each version as a GitHub Release using a numeric tag such as `v1.3.0` and attach the signed, notarized `.dmg` or `.zip` for users to download. Commits pushed to `main` do not appear as app updates until they are published as a Release.
+The direct-download edition on `main` retains GitHub Release update checking and Developer ID distribution. This keeps the Store binary compliant without removing the existing update experience from direct builds.
+
+See [`PRIVACY.md`](PRIVACY.md) and [`SUPPORT.md`](SUPPORT.md) for the public policy and support pages linked from the app.
 
 ## The `.labelbabyjr` file format
 

@@ -137,6 +137,20 @@ private final class LegacySelectionTextView: NSTextView {
         super.mouseDown(with: event)
     }
 
+    /// Paste only the clipboard's characters, discarding fonts, colors, sizes,
+    /// links, and other rich-text attributes from the source application. Using
+    /// `insertText` applies this editor's current typing attributes, so pasted
+    /// text still respects the label style the user selected here.
+    override func paste(_ sender: Any?) {
+        guard let plainText = NSPasteboard.general.string(forType: .string) else {
+            super.paste(sender)
+            return
+        }
+
+        markUserInteraction()
+        insertText(plainText, replacementRange: selectedRange())
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
 
